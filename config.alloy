@@ -8,10 +8,10 @@
 // OPTIMIZED FOR: Node Exporter Full Dashboard (ID 1860)
 //   https://grafana.com/grafana/dashboards/1860-node-exporter-full/
 //
-// METRIC BUDGET: ~201 allow-listed metric names. Actual series count depends
+// METRIC BUDGET: ~208 allow-listed metric names. Actual series count depends
 // on label cardinality (CPU cores, disks, NICs, filesystems, systemd units).
-// Typical bare-metal host: 400-800 series. Container-heavy host: kept under
-// control by Layers 2-4.
+// Typical cloud VM: 1100-1400 series (systemd units are the main driver at
+// ~750 series). Container-heavy hosts: kept under control by Layers 2-4.
 //
 // PROTECTION LAYERS:
 //   1. Allow-list    — only dashboard-required metric names pass through
