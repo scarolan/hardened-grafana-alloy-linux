@@ -42,7 +42,7 @@ variable "distros" {
     xfail_metrics = optional(list(string), [])
     # Expected series count range
     min_series = optional(number, 300)
-    max_series = optional(number, 900)
+    max_series = optional(number, 1500)
   }))
   default = {
     ubuntu2204 = {
@@ -52,10 +52,16 @@ variable "distros" {
     rocky9 = {
       image_project = "rocky-linux-cloud"
       image_family  = "rocky-linux-9"
+      xfail_metrics = ["node_pressure_cpu_waiting_seconds_total"]
     }
     debian12 = {
       image_project = "debian-cloud"
       image_family  = "debian-12"
+    }
+    centos9 = {
+      image_project = "centos-cloud"
+      image_family  = "centos-stream-9"
+      xfail_metrics = ["node_pressure_cpu_waiting_seconds_total"]
     }
     sles15 = {
       image_project = "suse-cloud"

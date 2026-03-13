@@ -85,9 +85,10 @@ resource "google_compute_instance" "alloy_test" {
     distro  = each.key
   }
 
-  # Auto-delete after 2 hours as a safety net
+  # Use standard instances to avoid preemption during test runs.
+  # VMs are destroyed by `make clean` or `terraform destroy` after tests.
   scheduling {
-    automatic_restart = false
-    preemptible       = true
+    automatic_restart = true
+    preemptible       = false
   }
 }

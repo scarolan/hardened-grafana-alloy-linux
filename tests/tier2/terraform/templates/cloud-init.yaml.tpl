@@ -100,16 +100,19 @@ ${config_alloy}
 ALLOY_CONFIG
 
 # Alloy environment file — includes vars expected by the config AND
-# the $CONFIG_FILE / $CUSTOM_ARGS vars expected by Alloy's systemd unit
-cat > /etc/default/alloy <<'ALLOY_ENV'
-CONFIG_FILE=/etc/alloy/config.alloy
+# the $CONFIG_FILE / $CUSTOM_ARGS vars expected by Alloy's systemd unit.
+# Debian/Ubuntu uses /etc/default/alloy, RPM distros use /etc/sysconfig/alloy.
+# Write to both to cover all distros.
+ALLOY_ENV_CONTENT='CONFIG_FILE=/etc/alloy/config.alloy
 CUSTOM_ARGS=--stability.level=generally-available
 GCLOUD_RW_API_KEY=not-used-local-test
 GRAFANA_METRICS_URL=http://localhost:9090/api/v1/write
 GRAFANA_METRICS_USERNAME=not-used
 GRAFANA_LOGS_URL=http://localhost:3100/loki/api/v1/push
-GRAFANA_LOGS_USERNAME=not-used
-ALLOY_ENV
+GRAFANA_LOGS_USERNAME=not-used'
+mkdir -p /etc/default /etc/sysconfig
+echo "$ALLOY_ENV_CONTENT" > /etc/default/alloy
+echo "$ALLOY_ENV_CONTENT" > /etc/sysconfig/alloy
 
 # Prometheus config
 mkdir -p /etc/prometheus
@@ -125,6 +128,19 @@ echo "=== Step 4: Configure Prometheus service ==="
 
 PROM_BIN=$(command -v prometheus 2>/dev/null || find /usr /usr/local -name prometheus -type f 2>/dev/null | head -1)
 
+# Detect Prometheus version to use correct remote-write flag
+# < 2.33 uses --enable-feature=remote-write-receiver
+# >= 2.33 uses --web.enable-remote-write-receiver
+PROM_VERSION_RAW=$($PROM_BIN --version 2>&1 | head -1 | grep -oP 'version \K[0-9.]+' || echo "0.0.0")
+PROM_MAJOR=$(echo "$PROM_VERSION_RAW" | cut -d. -f1)
+PROM_MINOR=$(echo "$PROM_VERSION_RAW" | cut -d. -f2)
+if [ "$PROM_MAJOR" -ge 3 ] 2>/dev/null || { [ "$PROM_MAJOR" -eq 2 ] && [ "$PROM_MINOR" -ge 33 ]; } 2>/dev/null; then
+  PROM_RW_FLAG="--web.enable-remote-write-receiver"
+else
+  PROM_RW_FLAG="--enable-feature=remote-write-receiver"
+fi
+echo "Prometheus $PROM_VERSION_RAW => using $PROM_RW_FLAG"
+
 cat > /etc/systemd/system/prometheus.service <<SVC
 [Unit]
 Description=Prometheus (test)
@@ -134,7 +150,7 @@ After=network.target
 Type=simple
 ExecStart=$PROM_BIN \\
   --config.file=/etc/prometheus/prometheus.yml \\
-  --web.enable-remote-write-receiver \\
+  $PROM_RW_FLAG \\
   --storage.tsdb.retention.time=1h \\
   --storage.tsdb.path=/var/lib/prometheus
 Restart=always

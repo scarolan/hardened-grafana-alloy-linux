@@ -24,3 +24,4 @@ tests/tier2/terraform/terraform.tfvars
 tests/tier1/config.alloy.test
 __pycache__/
 .pytest_cache/
+*.tfstate*
