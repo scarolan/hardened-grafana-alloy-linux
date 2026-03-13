@@ -486,6 +486,16 @@ prometheus.relabel "integrations_node_exporter" {
 	// Instead of silently dropping, we add quality_warning="missing_required_labels"
 	// so operators can query for {quality_warning=~".+"} to find and triage
 	// unapproved or misconfigured metric sources.
+	//
+	// REQUIRED LABELS BY METRIC FAMILY:
+	//   node_filesystem_*  → device, fstype
+	//   node_network_*     → device
+	//   node_disk_*        → device
+	//   node_cpu_*         → cpu
+	//
+	// If a metric arrives without the labels above, it gets tagged — not
+	// dropped. This catches misconfigured scrape targets or relabel rules
+	// that accidentally strip labels.
 	// =======================================================================
 
 	// Filesystem metrics SHOULD have device + fstype
