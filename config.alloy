@@ -536,6 +536,24 @@ prometheus.relabel "integrations_node_exporter" {
 // ---------------------------------------------------------------------------
 // LOG COLLECTION (systemd journal)
 // ---------------------------------------------------------------------------
+//
+// By default, ships all journal entries (equivalent to syslog/messages).
+// This is fine for most hosts, but logs can become the dominant cost driver
+// at scale — especially on busy app servers or hosts running chatty services.
+//
+// COST CONTROL OPTIONS (uncomment to activate):
+//
+//   1. Filter by priority — drop debug/info noise, keep warnings and above:
+//      Add a stage.match block in loki.process to drop low-priority entries.
+//
+//   2. Filter by unit — only ship logs from specific services:
+//      Add a rule in loki.relabel to drop entries from unwanted units.
+//
+//   3. Rate limit — cap log throughput per stream:
+//      Add a stage.limit block in loki.process.
+//
+// See commented examples in the journal_module below.
+// ---------------------------------------------------------------------------
 
 loki.relabel "integrations_node_exporter" {
 	forward_to = [loki.write.grafana_cloud_loki.receiver]
@@ -581,10 +599,44 @@ declare "journal_module" {
 			source_labels = ["__journal_priority_keyword"]
 			target_label  = "level"
 		}
+
+		// -----------------------------------------------------------------
+		// OPTIONAL: Filter by unit — only keep logs from specific services.
+		// Uncomment to activate. Drops everything not matching the regex.
+		// Add your own services: "(...|nginx\\.service|my-app\\.service)"
+		// -----------------------------------------------------------------
+		// rule {
+		//     source_labels = ["__journal__systemd_unit"]
+		//     regex         = "(sshd?\\.service|crond?\\.service|alloy\\.service|docker\\.service|kubelet\\.service|kernel)"
+		//     action        = "keep"
+		// }
+
 		forward_to = []
 	}
 
 	loki.process "default" {
+		// -----------------------------------------------------------------
+		// OPTIONAL: Filter by priority — drop debug and info, keep warn+.
+		// Journal priorities: emerg(0) alert(1) crit(2) err(3)
+		//                     warning(4) notice(5) info(6) debug(7)
+		// Uncomment to only ship warning and above (saves significant volume):
+		// -----------------------------------------------------------------
+		// stage.match {
+		//     selector = "{level=~\"info|debug|notice\"}"
+		//     action   = "drop"
+		// }
+
+		// -----------------------------------------------------------------
+		// OPTIONAL: Rate limit — cap log volume per stream.
+		// Useful as a safety net against log storms (e.g., crash loops).
+		// burst + rate are per-stream (unique label combination).
+		// -----------------------------------------------------------------
+		// stage.limit {
+		//     rate  = 100   // lines per second
+		//     burst = 500   // burst allowance
+		//     drop  = true  // drop excess (vs backpressure)
+		// }
+
 		forward_to = argument.forward_to.value
 	}
 }
