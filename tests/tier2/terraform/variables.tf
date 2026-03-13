@@ -41,8 +41,8 @@ variable "distros" {
     # Metrics that may not exist on this distro (marked xfail in tests)
     xfail_metrics = optional(list(string), [])
     # Expected series count range
-    min_series = optional(number, 300)
-    max_series = optional(number, 1500)
+    min_series = optional(number, 200)
+    max_series = optional(number, 800)
   }))
   default = {
     ubuntu2204 = {

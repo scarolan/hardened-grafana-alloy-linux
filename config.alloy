@@ -10,8 +10,9 @@
 //
 // METRIC BUDGET: ~208 allow-listed metric names. Actual series count depends
 // on label cardinality (CPU cores, disks, NICs, filesystems, systemd units).
-// Typical cloud VM: 1100-1400 series (systemd units are the main driver at
-// ~750 series). Container-heavy hosts: kept under control by Layers 2-4.
+// Typical cloud VM: 400-600 series. Systemd monitoring is filtered to ~15
+// essential services (~75 series). See the systemd block below to customize.
+// Container-heavy hosts: kept under control by Layers 2-4.
 //
 // PROTECTION LAYERS:
 //   1. Allow-list    — only dashboard-required metric names pass through
@@ -115,6 +116,16 @@ prometheus.exporter.unix "integrations_node_exporter" {
 		"tcpstat",   // TCP connection states
 		"systemd",   // systemd unit and socket metrics
 	]
+
+	// Systemd — monitor only essential services to keep cardinality low.
+	// Without this filter, ALL ~150 units × 5 states = ~750 series.
+	// With this filter: ~15 units × 5 states = ~75 series.
+	//
+	// TO CUSTOMIZE: Add your own services to the regex below, e.g.:
+	//   "(...|nginx\\.service|postgresql\\.service|my-app\\.service)"
+	systemd {
+		unit_include = "(sshd?\\.service|crond?\\.service|chronyd?\\.service|systemd-journald\\.service|systemd-resolved\\.service|systemd-timesyncd\\.service|systemd-logind\\.service|alloy\\.service|docker\\.service|containerd\\.service|kubelet\\.service|firewalld?\\.service|ufw\\.service|dbus\\.service)"
+	}
 
 	// Collectors NOT used by dashboard 1860 — disable to save resources
 	disable_collectors = [
