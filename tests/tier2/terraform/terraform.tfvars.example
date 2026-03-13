@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars and fill in:
+#   cp terraform.tfvars.example terraform.tfvars
+
+project_id          = "your-gcp-project-id"
+region              = "us-central1"
+zone                = "us-central1-a"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+ssh_user            = "testrunner"
+
+# Override distros to test a subset:
+# distros = {
+#   ubuntu2204 = {
+#     image_project = "ubuntu-os-cloud"
+#     image_family  = "ubuntu-2204-lts"
+#   }
+# }

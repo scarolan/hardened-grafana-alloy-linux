@@ -1,0 +1,98 @@
+# Synthetic metrics for testing cardinality protection and label validation rules.
+# Served by the fixture-server container in Docker Compose.
+#
+# Categories:
+#   1. Metrics that SHOULD be DROPPED by Layer 2 (cardinality protection)
+#   2. Metrics that SHOULD be TAGGED by Layer 3 (missing required labels)
+#   3. Metrics NOT on the allow-list (should be dropped by Layer 1)
+#   4. Clean metrics that SHOULD pass through unmodified
+
+# ==========================================================================
+# CATEGORY 1: Should be DROPPED by Layer 2 cardinality rules
+# ==========================================================================
+
+# Container mount path (dropped by container mount rule)
+node_filesystem_size_bytes{device="dm-0",fstype="ext4",mountpoint="/var/lib/docker/overlay2/abc123def/merged"} 107374182400
+node_filesystem_avail_bytes{device="dm-0",fstype="ext4",mountpoint="/var/lib/containerd/io.containerd.snapshotter/overlay/abc/merged"} 53687091200
+node_filesystem_free_bytes{device="dm-0",fstype="ext4",mountpoint="/var/lib/pods/abc123/volumes/data"} 53687091200
+
+# UUID in device label (dropped by UUID rule)
+node_disk_read_bytes_total{device="dm-8fa12b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"} 1048576
+node_disk_written_bytes_total{device="8fa12b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"} 2097152
+
+# UUID in mountpoint label (dropped by UUID rule)
+node_filesystem_size_bytes{device="/dev/sdb1",fstype="ext4",mountpoint="/mnt/8fa12b3c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"} 214748364800
+
+# Virtual interfaces (dropped by interface rule)
+node_network_receive_bytes_total{device="veth1a2b3c4"} 1000000
+node_network_transmit_bytes_total{device="cali98765abcdef"} 2000000
+node_network_receive_packets_total{device="docker0"} 50000
+node_network_receive_bytes_total{device="flannel.1"} 3000000
+
+# squashfs filesystem (dropped by fstype rule)
+node_filesystem_size_bytes{device="/dev/loop0",fstype="squashfs",mountpoint="/snap/core/12345"} 67108864
+node_filesystem_avail_bytes{device="/dev/loop1",fstype="overlay",mountpoint="/merged"} 0
+
+# Loopback (dropped by interface rule)
+node_network_receive_bytes_total{device="lo"} 999999
+
+# ==========================================================================
+# CATEGORY 2: Should be TAGGED with quality_warning="missing_required_labels"
+# These pass the allow-list but are missing required labels.
+# ==========================================================================
+
+# Filesystem metric without device and fstype (missing both)
+node_filesystem_size_bytes{mountpoint="/data"} 107374182400
+
+# Network metric without device label
+node_network_receive_bytes_total 5000000
+
+# Disk metric without device label
+node_disk_read_bytes_total 8388608
+
+# CPU metric without cpu label
+node_cpu_seconds_total{mode="idle"} 123456.78
+
+# ==========================================================================
+# CATEGORY 3: Should be DROPPED by Layer 1 (not on allow-list)
+# ==========================================================================
+
+# Disabled collector metrics
+node_xfs_block_mapping_extent_list_insertions_total 42
+node_nfs_requests_total{method="read"} 100
+node_bonding_active 1
+node_btrfs_info{uuid="test"} 1
+
+# Completely unknown metrics
+some_random_custom_metric{app="test"} 999
+another_unknown_metric 0
+
+# ==========================================================================
+# CATEGORY 4: Clean metrics that SHOULD pass through unmodified
+# These have all required labels and are on the allow-list.
+# ==========================================================================
+
+# Clean filesystem metric
+node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/testdata"} 107374182400
+node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/testdata"} 85899345920
+
+# Clean network metric
+node_network_receive_bytes_total{device="eth0"} 10000000000
+node_network_transmit_bytes_total{device="eth0"} 5000000000
+
+# Clean disk metric
+node_disk_read_bytes_total{device="sda"} 50000000000
+node_disk_written_bytes_total{device="sda"} 30000000000
+
+# Clean CPU metric
+node_cpu_seconds_total{cpu="0",mode="idle"} 999999.99
+node_cpu_seconds_total{cpu="0",mode="system"} 12345.67
+
+# Simple metrics (no label requirements)
+node_load1 1.5
+node_load5 1.2
+node_load15 0.9
+node_memory_MemTotal_bytes 16777216000
+node_memory_MemFree_bytes 8388608000
+node_boot_time_seconds 1710000000
+up 1

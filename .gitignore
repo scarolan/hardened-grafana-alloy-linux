@@ -13,3 +13,14 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Terraform
+tests/tier2/terraform/.terraform/
+tests/tier2/terraform/*.tfstate*
+tests/tier2/terraform/.terraform.lock.hcl
+tests/tier2/terraform/terraform.tfvars
+
+# Test artifacts
+tests/tier1/config.alloy.test
+__pycache__/
+.pytest_cache/
