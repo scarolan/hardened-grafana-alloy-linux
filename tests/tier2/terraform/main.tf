@@ -34,6 +34,20 @@ resource "google_compute_firewall" "allow_ssh" {
   target_tags   = ["alloy-test"]
 }
 
+# Firewall rule: allow Prometheus query from test runner (test-only)
+resource "google_compute_firewall" "allow_prometheus" {
+  name    = "alloy-test-allow-prometheus"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["9090"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["alloy-test"]
+}
+
 # One VM per distro
 resource "google_compute_instance" "alloy_test" {
   for_each = var.distros
@@ -57,20 +71,14 @@ resource "google_compute_instance" "alloy_test" {
 
   metadata = {
     ssh-keys = "${var.ssh_user}:${local.ssh_public_key}"
-    # cloud-init user-data
-    user-data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
-      config_alloy = local.config_alloy
-      distro_key   = each.key
-    })
   }
 
-  # Allow cloud-init to finish
-  metadata_startup_script = <<-EOT
-    #!/bin/bash
-    # Wait for cloud-init to complete, then signal readiness
-    cloud-init status --wait || true
-    touch /tmp/cloud-init-done
-  EOT
+  # Startup script: installs Alloy + Prometheus, deploys config, starts services.
+  # Uses metadata_startup_script (works on ALL GCP images, no cloud-init needed).
+  metadata_startup_script = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
+    config_alloy = local.config_alloy
+    distro_key   = each.key
+  })
 
   labels = {
     purpose = "alloy-test"

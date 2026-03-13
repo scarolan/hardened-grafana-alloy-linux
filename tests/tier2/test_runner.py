@@ -6,7 +6,7 @@ in Docker: systemd, PSI, hwmon, real disk/NIC devices, journal logs.
 Prerequisites:
   - Terraform applied: cd tests/tier2/terraform && terraform apply
   - VMs are running with Alloy + Prometheus
-  - SSH access configured
+  - gcloud auth login (uses gcloud compute ssh for access)
 
 Run via: make test-tier2
 """
@@ -17,7 +17,6 @@ import subprocess
 import sys
 import time
 
-import paramiko
 import pytest
 import requests
 
@@ -37,7 +36,6 @@ from metrics_allowlist import ALLOWLIST
 # ---------------------------------------------------------------------------
 
 TERRAFORM_DIR = os.path.join(os.path.dirname(__file__), "terraform")
-SSH_KEY_PATH = os.environ.get("SSH_KEY_PATH", os.path.expanduser("~/.ssh/id_rsa"))
 
 
 def get_terraform_output():
@@ -52,52 +50,42 @@ def get_terraform_output():
     return json.loads(result.stdout)
 
 
-def get_ssh_user():
-    """Read SSH user from Terraform output."""
+# ---------------------------------------------------------------------------
+# SSH via gcloud compute ssh (handles OS Login and key management)
+# ---------------------------------------------------------------------------
+
+def ssh_command(vm_name, zone, command, timeout=30):
+    """Execute a command on a GCP VM via gcloud compute ssh."""
     result = subprocess.run(
-        ["terraform", "output", "-raw", "ssh_user"],
-        cwd=TERRAFORM_DIR,
+        [
+            "gcloud", "compute", "ssh", vm_name,
+            f"--zone={zone}",
+            "--quiet",
+            f"--command={command}",
+        ],
         capture_output=True,
         text=True,
-        check=True,
+        timeout=timeout + 10,
     )
-    return result.stdout.strip()
+    return result.returncode, result.stdout, result.stderr
 
 
-# ---------------------------------------------------------------------------
-# SSH helpers
-# ---------------------------------------------------------------------------
-
-def ssh_command(ip, user, command, timeout=30):
-    """Execute a command on a remote host via SSH."""
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            ip,
-            username=user,
-            key_filename=SSH_KEY_PATH,
-            timeout=10,
-        )
-        _, stdout, stderr = client.exec_command(command, timeout=timeout)
-        exit_code = stdout.channel.recv_exit_status()
-        return exit_code, stdout.read().decode(), stderr.read().decode()
-    finally:
-        client.close()
-
-
-def wait_for_cloud_init(ip, user, timeout=300):
+def wait_for_cloud_init(vm_name, zone, timeout=300):
     """Wait for cloud-init to complete on a VM."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            code, out, _ = ssh_command(ip, user, "test -f /tmp/cloud-init-done && echo ready")
+            code, out, _ = ssh_command(
+                vm_name, zone,
+                "test -f /tmp/cloud-init-done && echo ready",
+                timeout=15,
+            )
             if code == 0 and "ready" in out:
                 return True
-        except Exception:
+        except (subprocess.TimeoutExpired, Exception):
             pass
-        time.sleep(10)
-    raise TimeoutError(f"cloud-init not done on {ip} after {timeout}s")
+        time.sleep(15)
+    raise TimeoutError(f"cloud-init not done on {vm_name} after {timeout}s")
 
 
 # ---------------------------------------------------------------------------
@@ -108,20 +96,21 @@ def wait_for_cloud_init(ip, user, timeout=300):
 def vm_details():
     """Load VM details from Terraform and wait for all VMs to be ready."""
     details = get_terraform_output()
-    user = get_ssh_user()
 
     # Wait for cloud-init on all VMs
     for distro, info in details.items():
+        name = info["name"]
+        zone = info["zone"]
         ip = info["ip"]
-        print(f"\nWaiting for cloud-init on {distro} ({ip})...")
-        wait_for_cloud_init(ip, user)
+        print(f"\nWaiting for cloud-init on {distro} ({name})...")
+        wait_for_cloud_init(name, zone)
         print(f"  {distro} ready, waiting for first scrape...")
         # Wait for Prometheus to have data
         prom_url = f"http://{ip}:9090"
         wait_for_metric(prom_url, "node_load1", timeout=180, interval=10)
         print(f"  {distro} scrape confirmed.")
 
-    return details, user
+    return details
 
 
 def distro_ids():
@@ -142,16 +131,18 @@ class TestServiceHealth:
 
     @pytest.mark.parametrize("distro", distro_ids())
     def test_alloy_running(self, vm_details, distro):
-        details, user = vm_details
-        ip = details[distro]["ip"]
-        code, out, _ = ssh_command(ip, user, "systemctl is-active alloy")
+        info = vm_details[distro]
+        code, out, _ = ssh_command(
+            info["name"], info["zone"], "systemctl is-active alloy"
+        )
         assert "active" in out, f"Alloy not active on {distro}: {out}"
 
     @pytest.mark.parametrize("distro", distro_ids())
     def test_prometheus_running(self, vm_details, distro):
-        details, user = vm_details
-        ip = details[distro]["ip"]
-        code, out, _ = ssh_command(ip, user, "systemctl is-active prometheus")
+        info = vm_details[distro]
+        code, out, _ = ssh_command(
+            info["name"], info["zone"], "systemctl is-active prometheus"
+        )
         assert "active" in out, f"Prometheus not active on {distro}: {out}"
 
 
@@ -160,8 +151,7 @@ class TestCollectorHealth:
 
     @pytest.mark.parametrize("distro", distro_ids())
     def test_all_collectors_healthy(self, vm_details, distro):
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         results = query_prometheus(prom_url, "node_scrape_collector_success == 0")
@@ -177,8 +167,7 @@ class TestRealCollectors:
     @pytest.mark.parametrize("distro", distro_ids())
     def test_systemd_metrics(self, vm_details, distro):
         """systemd unit state metrics must exist on real systemd hosts."""
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         results = query_prometheus(prom_url, "node_systemd_unit_state")
@@ -187,8 +176,7 @@ class TestRealCollectors:
     @pytest.mark.parametrize("distro", distro_ids())
     def test_psi_metrics(self, vm_details, distro):
         """PSI metrics require kernel 4.20+ with PSI enabled."""
-        details, user = vm_details
-        info = details[distro]
+        info = vm_details[distro]
         ip = info["ip"]
         prom_url = f"http://{ip}:9090"
 
@@ -202,8 +190,7 @@ class TestRealCollectors:
     @pytest.mark.parametrize("distro", distro_ids())
     def test_real_disk_device(self, vm_details, distro):
         """Disk metrics should reference real devices (sda, nvme0n1), not just loop."""
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         results = query_prometheus(prom_url, "node_disk_read_bytes_total")
@@ -216,8 +203,7 @@ class TestRealCollectors:
     @pytest.mark.parametrize("distro", distro_ids())
     def test_real_network_interface(self, vm_details, distro):
         """Network metrics should have real NICs (eth0, ens*), not lo/veth."""
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         results = query_prometheus(prom_url, "node_network_receive_bytes_total")
@@ -238,8 +224,7 @@ class TestRealCollectors:
     @pytest.mark.parametrize("distro", distro_ids())
     def test_hwmon_metrics(self, vm_details, distro):
         """hwmon metrics may not exist on cloud VMs (no physical sensors)."""
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         results = query_prometheus(prom_url, "node_hwmon_temp_celsius")
@@ -252,8 +237,7 @@ class TestMetricBudget:
 
     @pytest.mark.parametrize("distro", distro_ids())
     def test_series_count(self, vm_details, distro):
-        details, user = vm_details
-        info = details[distro]
+        info = vm_details[distro]
         ip = info["ip"]
         prom_url = f"http://{ip}:9090"
 
@@ -270,8 +254,7 @@ class TestAllowListCompliance:
 
     @pytest.mark.parametrize("distro", distro_ids())
     def test_no_metrics_outside_allowlist(self, vm_details, distro):
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         present = get_all_metric_names(prom_url)
@@ -314,8 +297,7 @@ class TestDashboard1860Coverage:
 
     @pytest.mark.parametrize("distro", distro_ids())
     def test_critical_metrics_present(self, vm_details, distro):
-        details, user = vm_details
-        ip = details[distro]["ip"]
+        ip = vm_details[distro]["ip"]
         prom_url = f"http://{ip}:9090"
 
         present = get_all_metric_names(prom_url)
