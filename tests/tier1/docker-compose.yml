@@ -70,6 +70,7 @@ services:
       - ./test_runner.py:/tests/test_runner.py:ro
       - ./requirements.txt:/tests/requirements.txt:ro
       - ../shared:/tests/shared:ro
+      - ../../config.alloy:/tests/config.alloy:ro
     environment:
       - PROMETHEUS_URL=http://prometheus:9090
     depends_on:

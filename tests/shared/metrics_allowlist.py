@@ -3,8 +3,13 @@
 import re
 from pathlib import Path
 
-# Path to the production config
-CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.alloy"
+# Path to the production config — check multiple locations to work both
+# locally (relative to repo root) and inside Docker containers.
+_candidates = [
+    Path(__file__).resolve().parents[2] / "config.alloy",  # repo root
+    Path.cwd() / "config.alloy",                           # Docker /tests/config.alloy
+]
+CONFIG_PATH = next((p for p in _candidates if p.exists()), _candidates[0])
 
 
 def parse_allowlist(config_path=CONFIG_PATH):
