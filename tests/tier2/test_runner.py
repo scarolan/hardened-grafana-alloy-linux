@@ -70,7 +70,7 @@ def ssh_command(vm_name, zone, command, timeout=30):
     return result.returncode, result.stdout, result.stderr
 
 
-def wait_for_cloud_init(vm_name, zone, timeout=300):
+def wait_for_cloud_init(vm_name, zone, timeout=600):
     """Wait for cloud-init to complete on a VM."""
     deadline = time.time() + timeout
     while time.time() < deadline:

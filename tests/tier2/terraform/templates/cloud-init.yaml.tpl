@@ -168,6 +168,12 @@ systemctl daemon-reload
 systemctl enable --now prometheus
 systemctl enable --now alloy
 
+# Restart both services to pick up our custom configs/unit files.
+# On apt-based distros, the package postinst may have already started
+# services with default args before our unit file was written.
+systemctl restart prometheus
+systemctl restart alloy
+
 # Wait and verify
 sleep 5
 systemctl is-active prometheus && echo "Prometheus: OK" || echo "Prometheus: FAILED"

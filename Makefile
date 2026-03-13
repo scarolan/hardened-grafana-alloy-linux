@@ -43,8 +43,8 @@ test: lint test-tier1 ## Run lint + Tier 1 (default CI target)
 test-tier2: ## Run Tier 2 tests on GCP VMs (requires terraform.tfvars)
 	@echo "=== Provisioning GCP VMs ==="
 	cd $(TIER2_DIR) && terraform init -input=false && terraform apply -auto-approve
-	@echo "=== Waiting for VMs to initialize ==="
-	@sleep 30
+	@echo "=== Waiting for VMs to initialize (5 min for package installs) ==="
+	@sleep 300
 	@echo "=== Running Tier 2 tests ==="
 	cd tests/tier2 && pip install -q -r requirements.txt && \
 		python -m pytest -v --tb=short test_runner.py; \
