@@ -51,6 +51,8 @@ metrics:
       - 'IsMatch(metric.name, "^go_.*")'        # Go runtime metrics
       - 'IsMatch(metric.name, "^process\\..*")'  # Process metrics
       - 'IsMatch(metric.name, "^rpc\\..*")'      # gRPC internals
+      - 'IsMatch(metric.name, "^istio_.*")'      # Istio sidecar metrics
+      - 'IsMatch(metric.name, "^envoy_.*")'      # Envoy proxy metrics
 ```
 
 To add your own deny patterns:
@@ -71,6 +73,8 @@ annotationAutodiscovery:
       - go_memstats_.*
       - promhttp_.*
       - process_.*
+      - istio_.*
+      - envoy_.*
 ```
 
 ### Layer 5: Trace filtering

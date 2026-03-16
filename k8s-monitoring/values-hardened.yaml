@@ -184,6 +184,9 @@ annotationAutodiscovery:
       # Drop Prometheus client internals
       - promhttp_.*
       - process_.*
+      # Drop Istio/Envoy sidecar metrics (scraped from annotated sidecar pods)
+      - istio_.*
+      - envoy_.*
     includeMetrics: []
 
   # Only scrape from these namespaces (deny-by-default for app metrics)
@@ -249,6 +252,14 @@ applicationObservability:
         - 'IsMatch(metric.name, "^process\\..*")'
         # Drop RPC-level metrics (extremely high cardinality with method labels)
         - 'IsMatch(metric.name, "^rpc\\..*")'
+        # Drop Istio/Envoy sidecar metrics — massive cardinality from per-path,
+        # per-response-code, per-upstream labels. Envoy alone can generate 500+
+        # metric names with thousands of label combinations per pod.
+        # If you actually need Istio metrics, remove these two lines and use a
+        # curated allow-list instead (istio_requests_total, istio_request_duration_*,
+        # istio_tcp_connections_opened_total, istio_tcp_connections_closed_total).
+        - 'IsMatch(metric.name, "^istio_.*")'
+        - 'IsMatch(metric.name, "^envoy_.*")'
         # Drop HTTP client/server duration histograms — use span metrics instead
         # Uncomment if you're using the spanMetrics connector:
         # - 'IsMatch(metric.name, "^http\\.(client|server)\\.duration")'
