@@ -7,22 +7,38 @@ Ships every metric required by the [Node Exporter Full](https://grafana.com/graf
 ## What's in the box
 
 ```
-config.alloy                  # Production config — the main deliverable
+config.alloy                  # Hardened Alloy config (River syntax)
+config-otel.yaml              # Hardened OTEL Collector config (YAML)
+ALLOY-VS-OTEL.md             # When to use which — honest comparison
 .env.example                  # Credential template (copy to .env)
 Makefile                      # lint, test-tier1, test-tier2, clean
+
+k8s-monitoring/
+  values-hardened.yaml        # Hardened values for k8s-monitoring-helm chart
+  values-test.yaml            # Test overrides for local k3d validation
+
 scripts/
   patch_config_for_test.py    # Rewrites config.alloy for Docker test env
+  patch_otel_config_for_test.py  # Rewrites config-otel.yaml for Docker test env
+
 tests/
   shared/
     assertions.py             # Reusable Prometheus query helpers
     metrics_allowlist.py      # Parses allow-list from config.alloy
-  tier1/                      # Fast Docker-based tests (CI)
+  tier1/                      # Alloy Docker tests (CI)
     docker-compose.yml
     test_runner.py            # 33 pytest cases
     fixtures/                 # Synthetic metrics for cardinality tests
-  tier2/                      # GCP VM-based tests (cross-distro)
-    terraform/                # Provisions VMs across 5 Linux distros
+  tier1-otel/                 # OTEL Collector Docker tests
+    docker-compose.yml        # Uses vanilla otel/opentelemetry-collector-contrib
+    test_runner.py            # 12 pytest cases
+  tier2/                      # Alloy GCP VM tests (cross-distro)
+    terraform/
     test_runner.py            # 55 pytest cases
+  tier2-otel/                 # OTEL Collector GCP VM tests
+    terraform/
+    test_runner.py            # 55 pytest cases
+
 .github/workflows/test.yml   # CI: lint + Tier 1 on every push/PR
 ```
 
@@ -37,7 +53,7 @@ The config uses a 4-layer defense-in-depth approach:
 | **3. Label tagging** | Metrics missing required labels get `quality_warning="missing_required_labels"` — visible for triage, not silently lost | Query `{quality_warning=~".+"}` to find them |
 | **4. Value limits** | Truncates extremely long label values | Mountpoints capped at 100 chars |
 
-**Typical series budget:** 400-600 per cloud VM.
+**Typical series budget:** 400-600 per cloud VM (Alloy), 100-300 per VM (OTEL Collector).
 
 ## Systemd monitoring
 
@@ -124,6 +140,35 @@ Check for data-quality issues:
 {quality_warning=~".+"}
 ```
 
+## OTEL Collector config (`config-otel.yaml`)
+
+A YAML-native equivalent using standard OpenTelemetry Collector components. Runs on **vanilla `otel/opentelemetry-collector-contrib`** — no Alloy required. Same cardinality protection philosophy, fewer Linux-specific metrics (no systemd, journal, conntrack, PSI).
+
+See [ALLOY-VS-OTEL.md](ALLOY-VS-OTEL.md) for a detailed comparison of when to use which.
+
+```bash
+make test-tier1-otel   # Docker tests against vanilla otelcol-contrib
+```
+
+## Kubernetes monitoring (`k8s-monitoring/`)
+
+Hardened `values.yaml` for the [Grafana k8s-monitoring-helm](https://github.com/grafana/k8s-monitoring-helm) chart. Enables OTLP ingestion on ports 4317/4318 with cardinality protection against rogue applications:
+
+- Default allow-lists ON for all Prometheus metric sources
+- OTLP metric filters drop `go_*`, `process.*`, `rpc.*` at ingestion
+- High-churn resource attributes stripped before export
+- Health check spans dropped
+- Attribute values truncated
+- Memory limiter and batch sizing on all collectors
+
+```bash
+helm install k8s-monitoring grafana/k8s-monitoring \
+  -f k8s-monitoring/values-hardened.yaml \
+  --set "destinations[0].auth.password=YOUR_API_KEY"
+```
+
+Tested on k3d: **1,635 series / 175 metric names** on a 2-node cluster.
+
 ## Self-monitoring (optional)
 
 Fleet management via `remotecfg` is disabled by default. It adds ~216 self-monitoring series (`job="integrations/alloy"`). To enable, uncomment the `remotecfg` block in `config.alloy` and set the fleet credentials in your `.env`.
@@ -165,6 +210,16 @@ cd tests/tier2/terraform && terraform destroy
 ```
 
 Tests across 5 distros: Ubuntu 22.04, Debian 12, Rocky 9, CentOS Stream 9, SUSE 15.
+
+### OTEL Tier 1 — Docker (vanilla otelcol-contrib)
+
+Proves `config-otel.yaml` runs on a vanilla OTEL Collector with no Alloy dependency.
+
+```bash
+make test-tier1-otel
+```
+
+Runs 12 tests. Uses `otel/opentelemetry-collector-contrib:latest`.
 
 ### Linting
 
