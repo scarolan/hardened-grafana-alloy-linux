@@ -1,0 +1,52 @@
+services:
+  # Local Prometheus — receives metrics via remote_write from OTEL collector
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-remote-write-receiver"
+      - "--storage.tsdb.retention.time=1h"
+    volumes:
+      - ../tier1/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Vanilla OpenTelemetry Collector (NOT Alloy) — proves config portability
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./config-otel.test.yaml:/etc/otelcol/config.yaml:ro
+      # Mount host filesystems for hostmetrics receiver
+      - /proc:/hostfs/proc:ro
+      - /sys:/hostfs/sys:ro
+      - /etc:/hostfs/etc:ro
+    environment:
+      - HOST_PROC=/hostfs/proc
+      - HOST_SYS=/hostfs/sys
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  # Test runner — waits for data, then runs assertions
+  test-runner:
+    image: python:3.12-slim
+    working_dir: /tests
+    command: >
+      bash -c "
+        pip install -q -r requirements.txt &&
+        python -m pytest -v --tb=short test_runner.py
+      "
+    volumes:
+      - ./test_runner.py:/tests/test_runner.py:ro
+      - ./requirements.txt:/tests/requirements.txt:ro
+      - ../shared:/tests/shared:ro
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+    depends_on:
+      - otelcol

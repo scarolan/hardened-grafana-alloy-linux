@@ -1,0 +1,411 @@
+# ============================================================================
+# GRAFANA ALLOY OTEL ENGINE — HARDENED LINUX MONITORING (YAML)
+# ============================================================================
+#
+# YAML-native equivalent of config.alloy using Alloy's experimental OTEL engine.
+# Run with: alloy otel --config=config-otel.yaml
+# Validate: alloy otel validate --config=config-otel.yaml
+#
+# IMPORTANT — DASHBOARD COMPATIBILITY:
+#   This config uses the OTel hostmetrics receiver, which produces metrics with
+#   OpenTelemetry semantic convention names (system.cpu.time, system.memory.usage,
+#   etc.) — NOT the node_exporter names (node_cpu_seconds_total, etc.) used by
+#   Dashboard 1860.
+#
+#   You have three options:
+#     a) Use an OTel-native dashboard (e.g., Grafana's "Host Metrics / OpenTelemetry"
+#        dashboard, ID 15983, or build your own)
+#     b) Use the alloyengine extension (see bottom of file) to run the original
+#        config.alloy alongside this YAML config for a gradual migration
+#     c) Install node_exporter separately and use the prometheus receiver to
+#        scrape it (preserves dashboard 1860 compatibility but defeats the
+#        point of YAML-only)
+#
+# METRIC BUDGET: ~40 OTel metric names from hostmetrics scrapers (fewer names
+# than node_exporter, but each may have multiple data points by attribute).
+# Typical cloud VM: 300-500 series after filtering.
+#
+# PROTECTION LAYERS (same philosophy as config.alloy):
+#   1. Scraper selection — only enable scrapers we need
+#   2. Filter processor — drop virtual interfaces, container mounts, etc.
+#   3. Transform processor — tag metrics missing required attributes
+#   4. Transform processor — truncate long attribute values
+#
+# CREDENTIALS: All secrets from environment variables (${env:VAR_NAME}).
+#
+# LIMITATIONS vs config.alloy:
+#   - No systemd unit state metrics (hostmetrics has no systemd scraper)
+#   - No TCP connection state metrics (no tcpstat equivalent)
+#   - No journal/journald log collection (use filelog receiver for syslog)
+#   - No conntrack, entropy, ARP, PSI, schedstat, softnet, hwmon, timex metrics
+#   - No lokiexporter — logs go via otlphttp to Loki's OTLP endpoint
+#   - Experimental: no systemd service install, no UI, no fleet management
+#
+# For full node_exporter parity, use config.alloy with the default Alloy engine.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# EXTENSIONS
+# ---------------------------------------------------------------------------
+extensions:
+  # Auth for Grafana Cloud endpoints
+  basicauth/grafana:
+    client_auth:
+      username: ${env:GRAFANA_METRICS_USERNAME}
+      password: ${env:GCLOUD_RW_API_KEY}
+
+  basicauth/loki:
+    client_auth:
+      username: ${env:GRAFANA_LOGS_USERNAME}
+      password: ${env:GCLOUD_RW_API_KEY}
+
+  # Health check for liveness probes
+  health_check:
+    endpoint: "0.0.0.0:13133"
+
+# ---------------------------------------------------------------------------
+# RECEIVERS
+# ---------------------------------------------------------------------------
+receivers:
+  # =========================================================================
+  # Host metrics — OTel equivalent of prometheus.exporter.unix
+  # =========================================================================
+  hostmetrics:
+    collection_interval: 60s
+    scrapers:
+      # -- CPU --
+      # Produces: system.cpu.time, system.cpu.utilization
+      cpu:
+
+      # -- Memory --
+      # Produces: system.memory.usage, system.memory.utilization,
+      #           system.memory.linux.available, system.memory.linux.shared,
+      #           system.memory.linux.slab.usage
+      memory:
+
+      # -- Load --
+      # Produces: system.cpu.load_average.1m, .5m, .15m
+      load:
+
+      # -- Disk I/O --
+      # Produces: system.disk.io, system.disk.operations, system.disk.io_time,
+      #           system.disk.operation_time, system.disk.merged
+      disk:
+        exclude:
+          devices:
+            - "^loop\\d+$"
+            - "^dm-\\d+$"
+            - "^ram\\d+$"
+          match_type: regexp
+
+      # -- Filesystem --
+      # Produces: system.filesystem.usage, system.filesystem.utilization,
+      #           system.filesystem.inodes.usage
+      filesystem:
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - binfmt_misc
+            - bpf
+            - cgroup
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - tmpfs
+            - fusectl
+            - hugetlbfs
+            - iso9660
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - procfs
+            - pstore
+            - rpc_pipefs
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tracefs
+          match_type: strict
+        exclude_mount_points:
+          mount_points:
+            - "^/(dev|proc|sys|run/credentials/.+|var/lib/docker/.+)($|/)"
+          match_type: regexp
+
+      # -- Network --
+      # Produces: system.network.io, system.network.packet.count,
+      #           system.network.errors, system.network.packet.dropped,
+      #           system.network.connection.count
+      network:
+        exclude:
+          interfaces:
+            - "^lo$"
+            - "^docker.*"
+            - "^veth.*"
+            - "^cali.*"
+            - "^flannel\\.\\d+"
+            - "^[a-f0-9]{15}$"
+          match_type: regexp
+
+      # -- Paging / Swap --
+      # Produces: system.paging.usage, system.paging.utilization,
+      #           system.paging.faults, system.paging.operations
+      paging:
+
+      # -- Processes --
+      # Produces: system.process.count, system.process.created
+      processes:
+
+  # =========================================================================
+  # Syslog — substitute for journald log collection
+  # =========================================================================
+  # The OTEL engine has no journal reader. Use filelog to tail syslog instead.
+  # Adjust the path for your distro:
+  #   Debian/Ubuntu: /var/log/syslog
+  #   RHEL/Rocky:    /var/log/messages
+  #
+  # TO CUSTOMIZE: Add include paths for your distro or application logs.
+  filelog/syslog:
+    include:
+      - /var/log/syslog
+      - /var/log/messages
+    # Don't fail if one path doesn't exist (e.g., /var/log/syslog on RHEL)
+    include_file_path_resolved: true
+    operators:
+      - type: regex_parser
+        regex: '^(?P<timestamp>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(?P<hostname>\S+)\s+(?P<unit>\S+?)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)'
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: "%b %e %H:%M:%S"
+          layout_type: gotime
+      - type: severity_parser
+        parse_from: attributes.message
+        mapping:
+          error:
+            - error
+            - err
+            - crit
+            - critical
+            - alert
+            - emerg
+          warn:
+            - warn
+            - warning
+          info:
+            - info
+            - notice
+          debug:
+            - debug
+
+# ---------------------------------------------------------------------------
+# PROCESSORS
+# ---------------------------------------------------------------------------
+processors:
+  # Standard batch processor — reduces export overhead
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+  # Memory limiter — back-pressure safety net
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Add host resource attributes
+  resourcedetection:
+    detectors: [system]
+    system:
+      hostname_sources: ["os"]
+      resource_attributes:
+        host.name:
+          enabled: true
+        os.type:
+          enabled: true
+
+  # Set standard resource attributes to match config.alloy conventions
+  resource/labels:
+    attributes:
+      - key: job
+        value: "integrations/host_metrics"
+        action: upsert
+      - key: instance
+        from_attribute: host.name
+        action: upsert
+
+  # =========================================================================
+  # LAYER 1 + 2: Filter — drop unwanted metrics and high-churn data points
+  # =========================================================================
+  #
+  # Unlike config.alloy's allow-list approach (keep only named metrics),
+  # the hostmetrics receiver produces a known, bounded set of ~40 metrics.
+  # We don't need an allow-list — instead we filter out noise at the
+  # data point level.
+  #
+  # The filter processor drops any telemetry matching these conditions.
+  # =========================================================================
+  filter/cardinality:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        # Drop metrics where device attribute contains a UUID (container sprawl)
+        - 'IsMatch(attributes["device"], ".*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}.*")'
+        # Drop filesystem metrics for container mounts
+        - 'IsMatch(attributes["mountpoint"], ".*/var/lib/(docker|containerd|pods)/.*")'
+        # Drop filesystem metrics where mountpoint contains a UUID
+        - 'IsMatch(attributes["mountpoint"], ".*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}.*")'
+
+  # =========================================================================
+  # LAYER 3: Label validation — tag metrics missing required attributes
+  #
+  # REQUIRED ATTRIBUTES BY METRIC FAMILY:
+  #   system.filesystem.*  → device, type (fstype), mountpoint
+  #   system.network.*     → device
+  #   system.disk.*        → device
+  #   system.cpu.*         → cpu
+  #
+  # Metrics arriving without these attributes get tagged with
+  # quality_warning="missing_required_attributes" for triage.
+  # Query: {quality_warning=~".+"} to find them.
+  # =========================================================================
+  transform/label_validation:
+    error_mode: ignore
+    metric_statements:
+      # Tag filesystem metrics missing device or type
+      - context: datapoint
+        conditions:
+          - 'IsMatch(metric.name, "^system\\.filesystem\\.")'
+        statements:
+          - 'set(attributes["quality_warning"], "missing_required_attributes") where attributes["device"] == nil or attributes["type"] == nil'
+
+      # Tag network metrics missing device
+      - context: datapoint
+        conditions:
+          - 'IsMatch(metric.name, "^system\\.network\\.")'
+        statements:
+          - 'set(attributes["quality_warning"], "missing_required_attributes") where attributes["device"] == nil'
+
+      # Tag disk metrics missing device
+      - context: datapoint
+        conditions:
+          - 'IsMatch(metric.name, "^system\\.disk\\.")'
+        statements:
+          - 'set(attributes["quality_warning"], "missing_required_attributes") where attributes["device"] == nil'
+
+      # Tag CPU metrics missing cpu attribute
+      - context: datapoint
+        conditions:
+          - 'IsMatch(metric.name, "^system\\.cpu\\.")'
+        statements:
+          - 'set(attributes["quality_warning"], "missing_required_attributes") where attributes["cpu"] == nil'
+
+  # =========================================================================
+  # LAYER 4: Truncate long attribute values
+  # =========================================================================
+  transform/truncate:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - 'truncate_all(attributes, 100)'
+
+  # =========================================================================
+  # Log filtering (optional — uncomment to activate)
+  # =========================================================================
+  #
+  # OPTIONAL: Filter by severity — drop debug/info, keep warnings and above.
+  # Uncomment to reduce log volume significantly.
+  #
+  # filter/log_severity:
+  #   error_mode: ignore
+  #   logs:
+  #     log_record:
+  #       - 'severity_number < SEVERITY_NUMBER_WARN'
+  #
+  # OPTIONAL: Filter by unit — only keep logs from specific services.
+  # Uncomment and customize the regex for your environment.
+  #
+  # filter/log_unit:
+  #   error_mode: ignore
+  #   logs:
+  #     log_record:
+  #       - 'not IsMatch(attributes["unit"], "(sshd|crond?|alloy|docker|kubelet).*")'
+
+# ---------------------------------------------------------------------------
+# EXPORTERS
+# ---------------------------------------------------------------------------
+exporters:
+  # Metrics → Grafana Cloud Prometheus (via remote write)
+  prometheusremotewrite/grafana:
+    endpoint: ${env:GRAFANA_METRICS_URL}
+    auth:
+      authenticator: basicauth/grafana
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logs → Grafana Cloud Loki (via OTLP HTTP)
+  # NOTE: Use the Loki OTLP endpoint, not the /loki/api/v1/push endpoint.
+  # The OTLP endpoint is typically at the same host with /otlp/v1/logs path.
+  # Example: https://logs-prod-us-central1.grafana.net/otlp/v1/logs
+  otlphttp/loki:
+    endpoint: ${env:GRAFANA_LOGS_OTLP_URL}
+    auth:
+      authenticator: basicauth/loki
+
+  # Uncomment for local debugging — prints telemetry to stdout
+  # debug:
+  #   verbosity: detailed
+
+# ---------------------------------------------------------------------------
+# SERVICE — wires everything together
+# ---------------------------------------------------------------------------
+service:
+  extensions:
+    - basicauth/grafana
+    - basicauth/loki
+    - health_check
+
+  pipelines:
+    metrics:
+      receivers:
+        - hostmetrics
+      processors:
+        - memory_limiter
+        - resourcedetection
+        - resource/labels
+        - filter/cardinality
+        - transform/label_validation
+        - transform/truncate
+        - batch
+      exporters:
+        - prometheusremotewrite/grafana
+
+    logs:
+      receivers:
+        - filelog/syslog
+      processors:
+        - memory_limiter
+        - resourcedetection
+        - resource/labels
+        # Uncomment if using log filtering:
+        # - filter/log_severity
+        # - filter/log_unit
+        - batch
+      exporters:
+        - otlphttp/loki
+
+  # =========================================================================
+  # OPTIONAL: Run the default Alloy engine alongside the OTEL engine.
+  # This lets you keep config.alloy (with node_exporter metrics and journal
+  # logs) running in parallel while you migrate to YAML. Uncomment below
+  # and add alloyengine to the extensions list above.
+  # =========================================================================
+  # extensions:
+  #   - alloyengine
+  #
+  # In your extensions block, add:
+  # alloyengine:
+  #   config_path: /etc/alloy/config.alloy

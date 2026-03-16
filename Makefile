@@ -1,9 +1,11 @@
-.PHONY: lint test-tier1 test-tier2 test clean patch-config help
+.PHONY: lint test-tier1 test-tier2 test test-tier1-otel test-tier2-otel test-otel clean patch-config help
 
 SHELL := /bin/bash
 TIER1_DIR := tests/tier1
+TIER1_OTEL_DIR := tests/tier1-otel
 TIER2_DIR := tests/tier2/terraform
 COMPOSE := docker compose -f $(TIER1_DIR)/docker-compose.yml
+COMPOSE_OTEL := docker compose -f $(TIER1_OTEL_DIR)/docker-compose.yml
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -37,6 +39,27 @@ test-tier1: patch-config ## Run Tier 1 tests in Docker
 test: lint test-tier1 ## Run lint + Tier 1 (default CI target)
 
 # ---------------------------------------------------------------------------
+# Tier 1 OTEL: Docker-based tests using vanilla otelcol-contrib
+# ---------------------------------------------------------------------------
+
+patch-otel-config: ## Generate test-patched OTEL config for Tier 1
+	@echo "=== Patching OTEL config for Docker tests ==="
+	python3 scripts/patch_otel_config_for_test.py
+
+test-tier1-otel: patch-otel-config ## Run Tier 1 OTEL tests (vanilla otelcol-contrib in Docker)
+	@echo "=== Starting OTEL Tier 1 test environment ==="
+	$(COMPOSE_OTEL) up -d prometheus otelcol
+	@echo "=== Waiting for OTEL collector to push metrics (~90s) ==="
+	@echo "=== Running tests ==="
+	$(COMPOSE_OTEL) run --rm test-runner; \
+		EXIT_CODE=$$?; \
+		echo "=== Tearing down ===";\
+		$(COMPOSE_OTEL) down -v; \
+		exit $$EXIT_CODE
+
+test-otel: test-tier1-otel ## Run OTEL Tier 1 tests
+
+# ---------------------------------------------------------------------------
 # Tier 2: GCP VM-based tests (thorough, cross-distro)
 # ---------------------------------------------------------------------------
 
@@ -59,7 +82,9 @@ test-tier2: ## Run Tier 2 tests on GCP VMs (requires terraform.tfvars)
 
 clean: ## Remove all test artifacts and infrastructure
 	$(COMPOSE) down -v 2>/dev/null || true
+	$(COMPOSE_OTEL) down -v 2>/dev/null || true
 	rm -f $(TIER1_DIR)/config.alloy.test
+	rm -f $(TIER1_OTEL_DIR)/config-otel.test.yaml
 	cd $(TIER2_DIR) && terraform destroy -auto-approve 2>/dev/null || true
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true

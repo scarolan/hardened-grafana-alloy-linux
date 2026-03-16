@@ -25,3 +25,4 @@ tests/tier1/config.alloy.test
 __pycache__/
 .pytest_cache/
 *.tfstate*
+tests/tier1-otel/config-otel.test.yaml
