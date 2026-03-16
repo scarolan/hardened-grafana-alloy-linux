@@ -1,0 +1,58 @@
+# Test-specific overrides — deploys to k3d with a local Prometheus destination.
+# Layered on top of values-hardened.yaml:
+#   helm install k8s-monitoring grafana/k8s-monitoring \
+#     -f values-hardened.yaml -f values-test.yaml
+
+cluster:
+  name: "hardened-test"
+
+# Override destination to a local Prometheus (no auth needed)
+destinations:
+  - name: local-prometheus
+    type: prometheus
+    url: "http://prometheus.monitoring.svc:9090/api/v1/write"
+    auth:
+      type: none
+    processors:
+      resourceAttributes:
+        useDefaultRemoveList: true
+
+# Disable features that need log/trace backends (Prometheus is metrics-only)
+clusterEvents:
+  enabled: false
+
+podLogs:
+  enabled: false
+
+# Disable logs and traces in app observability (no Loki/Tempo destination)
+applicationObservability:
+  logs:
+    enabled: false
+  traces:
+    enabled: false
+
+# Don't need the logs or singleton collectors
+alloy-logs:
+  enabled: false
+
+alloy-singleton:
+  enabled: false
+
+# Reduce resource requests for k3d
+alloy-metrics:
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+
+alloy-receiver:
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi

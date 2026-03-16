@@ -1,0 +1,415 @@
+# ============================================================================
+# HARDENED VALUES FOR grafana/k8s-monitoring HELM CHART
+# ============================================================================
+#
+# Defense-in-depth cardinality protection for Kubernetes monitoring.
+# Designed for cost-conscious teams running the k8s-monitoring-helm chart
+# with OTLP application ingestion on ports 4317 and 4318.
+#
+# WHAT THIS ENABLES:
+#   - Cluster metrics (kubelet, cAdvisor, kube-state-metrics, node-exporter)
+#   - Cluster events
+#   - Pod logs
+#   - OTLP receivers for application metrics, traces, and logs
+#   - Annotation-based autodiscovery for Prometheus scraping
+#
+# CARDINALITY PROTECTION LAYERS:
+#   1. Default allow-lists ON for all Prometheus metric sources
+#   2. OTLP resource attribute stripping (high-churn attrs removed)
+#   3. OTLP metric name filtering (block unbounded app metrics)
+#   4. Trace tail sampling (keep errors + sample the rest)
+#   5. Memory limiter on all collectors (back-pressure safety net)
+#   6. Batch sizing limits
+#
+# SERIES BUDGET (typical small-to-medium cluster):
+#   Cluster infra metrics:  ~2,000-5,000 series
+#   Application metrics:    Depends on your OTLP filter rules below
+#   Total target:           <10,000 series for a 10-node cluster
+#
+# USAGE:
+#   helm install k8s-monitoring grafana/k8s-monitoring \
+#     -f values-hardened.yaml \
+#     --set "destinations[0].auth.password=YOUR_API_KEY"
+#
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# CLUSTER IDENTITY
+# ---------------------------------------------------------------------------
+cluster:
+  name: "my-cluster"  # CHANGE THIS — applied as a label on all telemetry
+
+# ---------------------------------------------------------------------------
+# GLOBAL DEFAULTS
+# ---------------------------------------------------------------------------
+global:
+  scrapeInterval: 60s   # 60s is plenty for infra metrics — save ingestion costs
+  scrapeTimeout: 10s
+  maxCacheSize: 100000  # Relabel cache; increase if you see cache eviction warnings
+
+# ---------------------------------------------------------------------------
+# DESTINATIONS
+# ---------------------------------------------------------------------------
+# Configure your Grafana Cloud (or self-hosted) endpoints here.
+# For Grafana Cloud OTLP gateway: use type: otlp with the single endpoint.
+# For split endpoints: use separate prometheus + loki destinations.
+
+destinations:
+  - name: grafana-cloud
+    type: otlp
+    url: "https://otlp-gateway-prod-us-central-0.grafana.net/otlp"
+    auth:
+      type: basic
+      username: "YOUR_INSTANCE_ID"     # CHANGE THIS
+      password: "YOUR_API_KEY"         # Set via --set or external secret
+    processors:
+      # Strip high-cardinality resource attributes before export
+      resourceAttributes:
+        useDefaultRemoveList: true
+        # Additional attributes to strip (customize for your environment)
+        removeList:
+          - "process.runtime.name"
+          - "telemetry.distro.name"
+          - "telemetry.distro.version"
+
+      # Memory limiter — back-pressure before OOM
+      memoryLimiter:
+        enabled: true
+        checkInterval: 5s
+        limit: 256MiB
+
+      # Batch settings — don't let a single burst overwhelm the destination
+      batch:
+        size: 8192
+        timeout: 2s
+
+# ---------------------------------------------------------------------------
+# CLUSTER METRICS (Prometheus scraping of K8s infrastructure)
+# ---------------------------------------------------------------------------
+clusterMetrics:
+  enabled: true
+
+  # -- Kubelet metrics --
+  kubelet:
+    enabled: true
+    metricsTuning:
+      useDefaultAllowList: true   # 36 curated metrics
+      excludeMetrics: []
+      includeMetrics: []
+
+  # -- cAdvisor (container resource metrics) --
+  cadvisor:
+    enabled: true
+    metricsTuning:
+      useDefaultAllowList: true   # 19 curated metrics
+      excludeMetrics:
+        # Drop per-CPU container metrics (high cardinality on large nodes)
+        - container_cpu_usage_seconds_total;cpu=".+"
+      includeMetrics: []
+
+  # -- kube-state-metrics --
+  kubeStateMetrics:
+    enabled: true
+    metricsTuning:
+      useDefaultAllowList: true   # ~50 curated metric patterns
+      excludeMetrics: []
+      includeMetrics: []
+
+  # -- Node exporter --
+  nodeExporter:
+    enabled: true
+    metricsTuning:
+      useDefaultAllowList: true   # 10 curated metric patterns
+      # Use the tighter integration allow list for cost-conscious deployments.
+      # Set to true if you want the minimal set for Grafana Cloud Linux integration.
+      useIntegrationAllowList: false
+      excludeMetrics: []
+      includeMetrics: []
+
+  # -- Kubelet probes (disabled — noisy, rarely useful) --
+  kubeletProbes:
+    enabled: false
+
+  # -- Kubelet resource metrics (disabled — duplicates cAdvisor) --
+  kubeletResource:
+    enabled: false
+
+  # -- Kepler (disabled — energy monitoring, niche use case) --
+  kepler:
+    enabled: false
+
+  # -- OpenCost (disabled — enable if you need cost allocation) --
+  opencost:
+    enabled: false
+
+# ---------------------------------------------------------------------------
+# CLUSTER EVENTS
+# ---------------------------------------------------------------------------
+clusterEvents:
+  enabled: true
+  # Events are low-volume but useful for debugging
+  # No cardinality concern here
+
+# ---------------------------------------------------------------------------
+# POD LOGS
+# ---------------------------------------------------------------------------
+podLogs:
+  enabled: true
+  # Collect from filesystem (DaemonSet) — more efficient than K8s API
+  gatherMethod: volumes
+
+  # TO CUSTOMIZE: Add namespace-level filtering to reduce log volume.
+  # Uncomment to only collect logs from specific namespaces:
+  # namespaces:
+  #   - default
+  #   - my-app
+  #   - monitoring
+
+# ---------------------------------------------------------------------------
+# ANNOTATION AUTODISCOVERY
+# ---------------------------------------------------------------------------
+# Scrapes pods/services annotated with k8s.grafana.com/scrape: "true".
+# This is how your apps expose Prometheus metrics for scraping.
+annotationAutodiscovery:
+  enabled: true
+  metricsTuning:
+    useDefaultAllowList: false   # No default — app metrics vary too much
+    excludeMetrics:
+      # Drop Go runtime metrics unless explicitly needed — high cardinality
+      - go_gc_.*
+      - go_memstats_.*
+      - go_threads
+      - go_goroutines
+      - go_info
+      # Drop Prometheus client internals
+      - promhttp_.*
+      - process_.*
+    includeMetrics: []
+
+  # Only scrape from these namespaces (deny-by-default for app metrics)
+  # TO CUSTOMIZE: Add your app namespaces here.
+  # namespaces:
+  #   - default
+  #   - my-app
+
+# ---------------------------------------------------------------------------
+# APPLICATION OBSERVABILITY (OTLP receivers)
+# ---------------------------------------------------------------------------
+# This is where random apps can blow up your cardinality.
+# Defense-in-depth: filter at the receiver level before data hits the pipeline.
+applicationObservability:
+  enabled: true
+
+  receivers:
+    otlp:
+      grpc:
+        enabled: true
+        port: 4317
+        # Cap message size to prevent abuse
+        maxReceivedMessageSize: 4MiB
+      http:
+        enabled: true
+        port: 4318
+        # Cap request body to prevent abuse
+        maxRequestBodySize: 20MiB
+
+    # Disable legacy receivers unless you explicitly need them
+    jaeger:
+      grpc:
+        enabled: false
+      thriftBinary:
+        enabled: false
+      thriftCompact:
+        enabled: false
+      thriftHttp:
+        enabled: false
+    zipkin:
+      enabled: false
+
+  # =========================================================================
+  # OTLP METRIC FILTERS — this is the critical cardinality gate
+  # =========================================================================
+  # Apps pushing OTLP metrics can send anything. These filters are your
+  # first line of defense against a rogue app flooding your metrics backend.
+  #
+  # Strategy: drop known-noisy metric families, then use the transform
+  # processor to enforce label hygiene.
+  #
+  # TO CUSTOMIZE: Add your own deny patterns for metrics you don't need.
+  # =========================================================================
+  metrics:
+    enabled: true
+    filters:
+      # Drop metrics matching these OTTL expressions.
+      # Each expression that matches causes the metric to be DROPPED.
+      metric:
+        # Drop Go runtime metrics pushed via OTLP (high cardinality, rarely useful)
+        - 'IsMatch(metric.name, "^go_.*")'
+        # Drop process.* runtime metrics (use resource attributes instead)
+        - 'IsMatch(metric.name, "^process\\..*")'
+        # Drop RPC-level metrics (extremely high cardinality with method labels)
+        - 'IsMatch(metric.name, "^rpc\\..*")'
+        # Drop HTTP client/server duration histograms — use span metrics instead
+        # Uncomment if you're using the spanMetrics connector:
+        # - 'IsMatch(metric.name, "^http\\.(client|server)\\.duration")'
+      datapoint: []
+
+    transforms:
+      metric: []
+      datapoint:
+        # Truncate long attribute values to prevent runaway label cardinality
+        - 'truncate_all(attributes, 200)'
+      resource: []
+
+  # =========================================================================
+  # OTLP TRACE FILTERS
+  # =========================================================================
+  traces:
+    enabled: true
+    filters:
+      # Drop health check spans (noisy, low value)
+      span:
+        - 'IsMatch(attributes["http.target"], "^/(healthz|readyz|livez|health|ready|ping)$")'
+        - 'IsMatch(attributes["url.path"], "^/(healthz|readyz|livez|health|ready|ping)$")'
+      spanevent: []
+
+    transforms:
+      span:
+        # Truncate long attribute values on spans
+        - 'truncate_all(attributes, 500)'
+      resource: []
+
+  # =========================================================================
+  # OTLP LOG FILTERS
+  # =========================================================================
+  logs:
+    enabled: true
+    filters:
+      log_record: []
+      # TO CUSTOMIZE: Drop debug-level OTLP logs to reduce volume:
+      # log_record:
+      #   - 'severity_number < SEVERITY_NUMBER_WARN'
+
+    transforms:
+      log_record:
+        # Truncate log body to prevent extremely long log lines
+        - 'truncate_all(attributes, 500)'
+      resource: []
+
+  # =========================================================================
+  # CONNECTORS
+  # =========================================================================
+  connectors:
+    grafanaCloudMetrics:
+      enabled: true   # Required for Grafana Cloud Application Observability
+
+    spanMetrics:
+      enabled: false  # Enable if you want RED metrics derived from traces
+      # If enabled, cap the cardinality:
+      # aggregationCardinalityLimit: 1000
+      # excludeDimensions:
+      #   - "net.sock.peer.addr"
+      #   - "net.sock.peer.port"
+
+    spanLogs:
+      enabled: false  # Enable to derive logs from trace spans
+
+  # =========================================================================
+  # PROCESSORS
+  # =========================================================================
+  processors:
+    # Interval processor — aggregate metrics to reduce volume
+    # Enable for high-volume OTLP metric sources
+    interval:
+      enabled: false
+      interval: 60s
+
+# ---------------------------------------------------------------------------
+# PROMETHEUS OPERATOR OBJECTS (disabled by default)
+# ---------------------------------------------------------------------------
+# Enable if you have existing ServiceMonitor/PodMonitor CRDs.
+# Warning: these can introduce unbounded metrics if monitors are misconfigured.
+prometheusOperatorObjects:
+  enabled: false
+  # If you enable this, use namespace filtering:
+  # namespaces:
+  #   - monitoring
+
+# ---------------------------------------------------------------------------
+# COLLECTOR INSTANCES
+# ---------------------------------------------------------------------------
+# Enable only the collectors needed for the features above.
+
+alloy-metrics:
+  enabled: true
+  controller:
+    type: statefulset
+    replicas: 1
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+alloy-singleton:
+  enabled: true
+  controller:
+    type: deployment
+    replicas: 1
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+alloy-logs:
+  enabled: true
+  controller:
+    type: daemonset
+  alloy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+
+alloy-receiver:
+  enabled: true
+  controller:
+    type: deployment
+    replicas: 1
+    # Scale up for high-throughput OTLP ingestion:
+    # replicas: 2
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+  # Expose OTLP ports via service
+  service:
+    type: ClusterIP
+
+alloy-profiles:
+  enabled: false  # Enable if using Pyroscope profiling
+
+# ---------------------------------------------------------------------------
+# FEATURES NOT ENABLED (explicitly disabled for clarity)
+# ---------------------------------------------------------------------------
+nodeLogs:
+  enabled: false   # Use podLogs instead — less noisy
+
+autoInstrumentation:
+  enabled: false   # Beyla — enable if you want zero-code instrumentation
+
+profiling:
+  enabled: false
+
+selfReporting:
+  enabled: false   # Disable anonymous usage telemetry
