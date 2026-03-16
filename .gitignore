@@ -26,3 +26,6 @@ __pycache__/
 .pytest_cache/
 *.tfstate*
 tests/tier1-otel/config-otel.test.yaml
+tests/tier2-otel/terraform/.terraform/
+tests/tier2-otel/terraform/terraform.tfstate*
+tests/tier2-otel/terraform/.terraform.lock.hcl
