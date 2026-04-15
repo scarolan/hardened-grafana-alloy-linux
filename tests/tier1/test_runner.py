@@ -43,8 +43,15 @@ def wait_for_scrape():
     print(f"\nWaiting for metrics to appear in Prometheus at {PROMETHEUS_URL}...")
     # Wait for a metric we know the unix exporter will produce
     wait_for_metric(PROMETHEUS_URL, "node_load1", timeout=180, interval=5)
-    # Also wait for synthetic fixture metrics to arrive
-    wait_for_metric(PROMETHEUS_URL, "node_load5", timeout=60, interval=5)
+    # Wait for a metric that ONLY comes from the synthetic fixture, ensuring
+    # the fixture has been scraped and fully processed through the pipeline.
+    # node_load1/5 can arrive from the unix exporter first, creating a race.
+    wait_for_metric(
+        PROMETHEUS_URL,
+        'node_filesystem_size_bytes{mountpoint="/testdata"}',
+        timeout=60,
+        interval=5,
+    )
     print("Metrics available, running tests.")
 
 
