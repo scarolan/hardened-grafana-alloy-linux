@@ -1,0 +1,96 @@
+// ---------------------------------------------------------------------------
+// Blackbox exporter — config embedded inline (no external YAML needed)
+// ---------------------------------------------------------------------------
+
+prometheus.remote_write "metrics_service" {
+    // Uncomment for fleet deployments:
+    // external_labels = {
+    //   environment = "production",
+    //   region      = "us-east-1",
+    //   cluster     = "default",
+    // }
+
+    endpoint {
+        url = sys.env("GRAFANA_METRICS_URL")
+
+        basic_auth {
+            username = sys.env("GRAFANA_METRICS_USERNAME")
+            password = sys.env("GCLOUD_RW_API_KEY")
+        }
+    }
+}
+
+prometheus.exporter.blackbox "integrations_blackbox" {
+    config = `
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 201, 204]
+      follow_redirects: true
+      fail_if_ssl: false
+  http_post_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: '{"ping": true}'
+  icmp:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: ip4
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+`
+
+    // One target block per thing you want to probe.
+    // 'module' must match a key under 'modules:' above.
+    target {
+        name    = "grafana-com-http"
+        address = "https://grafana.com"
+        module  = "http_2xx"
+        labels  = {env = "prod", team = "platform"}
+    }
+
+    target {
+        name    = "internal-api-tcp"
+        address = "internal-api.example.com:8080"
+        module  = "tcp_connect"
+        labels  = {env = "prod", team = "platform"}
+    }
+
+    target {
+        name    = "gateway-ping"
+        address = "10.0.0.1"
+        module  = "icmp"
+        labels  = {env = "prod"}
+    }
+}
+
+// Add job/instance like any other scrape target
+discovery.relabel "integrations_blackbox" {
+    targets = prometheus.exporter.blackbox.integrations_blackbox.targets
+
+    rule {
+        target_label = "job"
+        replacement  = "integrations/blackbox"
+    }
+
+    rule {
+        target_label = "instance"
+        replacement  = constants.hostname
+    }
+}
+
+prometheus.scrape "integrations_blackbox" {
+    targets         = discovery.relabel.integrations_blackbox.output
+    forward_to      = [prometheus.remote_write.metrics_service.receiver]
+    scrape_interval = "60s"
+    scrape_timeout  = "10s" // must be > blackbox module timeout
+}
