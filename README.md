@@ -1,6 +1,6 @@
 # Hardened Grafana Alloy for Linux
 
-A production-ready, hardened [Grafana Alloy](https://grafana.com/docs/alloy/) configuration for Linux monitoring with defense-in-depth cardinality protection. Ships every metric required by the [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) dashboard (ID 1860) while keeping series counts lean and predictable.
+A default [Grafana Alloy](https://grafana.com/docs/alloy/) install on Linux ships **2,000+ series per host** — most of them metrics no dashboard consumes, and cost you'll pay for indefinitely. This repo is a prebuilt, production-ready Alloy config that ships exactly what the [Node Exporter Full dashboard (ID 1860)](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) needs. Defense-in-depth cardinality protection keeps a typical cloud VM around **400–600 series** with no panels missing.
 
 ## Pick Your Deployment Path
 
@@ -8,6 +8,8 @@ A production-ready, hardened [Grafana Alloy](https://grafana.com/docs/alloy/) co
 |------|-------------|-------|
 | **Direct Deployment** | The hardened `config.alloy` lives on each host. You manage config updates via your existing tooling (Ansible, Chef, Puppet, cloud-init, manual). | [docs/direct-deployment.md](docs/direct-deployment.md) |
 | **Fleet Management** | A minimal bootstrap config (`fleet-config.alloy`) lives on each host. You build and push the real collection pipelines centrally via Grafana Cloud Fleet Management. | [docs/fleet-management.md](docs/fleet-management.md) |
+
+Both paths need the same five environment variables. See **[docs/env-vars.md](docs/env-vars.md)** for the canonical reference and how to set them (systemd env file, drop-in override, verification commands).
 
 ## What's in the box
 
@@ -21,6 +23,7 @@ examples/blackbox.alloy       # Self-contained pipeline pattern (blackbox export
 docs/
   direct-deployment.md        # Path 1 end-to-end guide
   fleet-management.md         # Path 2 end-to-end guide
+  env-vars.md                 # Canonical reference for all 5 env vars
 
 k8s-monitoring/
   values-hardened.yaml        # Hardened values for k8s-monitoring-helm chart

@@ -83,17 +83,17 @@ Put credentials in the Alloy env file. The path depends on distro:
 - **RHEL / Rocky / CentOS / SUSE:** `/etc/sysconfig/alloy`
 
 ```bash
-cat >> /etc/default/alloy <<'EOF'
+sudo tee -a /etc/default/alloy >/dev/null <<'EOF'
 GCLOUD_RW_API_KEY=glc_xxxxxxxxxxxxx
 GRAFANA_METRICS_URL=https://prometheus-prod-13-prod-us-east-0.grafana.net/api/prom/push
 GRAFANA_METRICS_USERNAME=000000
 GRAFANA_LOGS_URL=https://logs-prod-006.grafana.net/loki/api/v1/push
 GRAFANA_LOGS_USERNAME=000000
 EOF
-chmod 600 /etc/default/alloy
+sudo chmod 600 /etc/default/alloy
 ```
 
-For scale-out: Ansible `lineinfile`/`template`, Chef `file` resource, etc.
+For scale-out: Ansible `lineinfile`/`template`, Chef `file` resource, etc. Full reference including a portable `systemctl edit` approach and verification commands: see [env-vars.md](env-vars.md).
 
 ## Step 4: Start the Service
 
@@ -104,19 +104,36 @@ systemctl status alloy
 
 ## Step 5: Verify and Import the Dashboard
 
-Import the [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) dashboard (ID 1860) into Grafana. All panels should populate within a couple of minutes.
+### Quick PromQL smoke test
 
-Check for data-quality issues:
+Confirm data is flowing *before* importing the dashboard. Go to **Explore → Prometheus** in Grafana and run:
 
 ```promql
-{quality_warning=~".+"}
+# 1. Is this host's Alloy alive and scraping?
+up{instance="<your-hostname>"}
+# Expected: 1
+
+# 2. How many distinct series is this host shipping?
+count(count by (__name__) ({instance="<your-hostname>"}))
+# Expected: ~400-600 for a typical cloud VM on the hardened config
+
+# 3. Any metrics missing required labels? (should be empty in production)
+count({quality_warning="missing_required_labels", instance="<your-hostname>"})
 ```
 
-Troubleshooting from the host:
+If query 1 is `0` or empty, the host isn't pushing. Check `systemctl status alloy` and `journalctl -u alloy -n 50`.
+
+### Import the dashboard
+
+Once the smoke tests pass, import the [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) dashboard (ID 1860). All panels should populate.
+
+### Troubleshooting from the host
 
 ```bash
 systemctl status alloy
-journalctl -u alloy -n 50
+journalctl -u alloy -n 100 --no-pager
+# Check what env vars the running process has (see docs/env-vars.md for details)
+sudo tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value alloy)/environ | grep -E '^(GCLOUD_|GRAFANA_)'
 ```
 
 ## Summary
