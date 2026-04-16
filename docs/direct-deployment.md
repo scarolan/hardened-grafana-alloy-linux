@@ -56,11 +56,17 @@ dnf install -y alloy
 
 ## Step 2: Deploy the Config File
 
+Grab the hardened config from this repo and drop it at `/etc/alloy/config.alloy`. Most users do this without cloning — pull the raw file, or copy-paste from the browser:
+
 ```bash
-cp config.alloy /etc/alloy/config.alloy
+# Download directly from the repo
+curl -fsSL https://raw.githubusercontent.com/scarolan/hardened-grafana-alloy-linux/main/config.alloy \
+  -o /etc/alloy/config.alloy
 ```
 
-Distribute via your usual tooling:
+Or open the [raw file on GitHub](https://raw.githubusercontent.com/scarolan/hardened-grafana-alloy-linux/main/config.alloy), copy the contents, and paste into `/etc/alloy/config.alloy` on the host.
+
+For scale-out, stage the file on a repo/share/artifact store and distribute via your usual tooling:
 
 | Tool | Method |
 |------|--------|

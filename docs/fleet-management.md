@@ -58,11 +58,18 @@ dnf install -y alloy
 
 ## Step 2: Deploy `fleet-config.alloy`
 
-Edit the Fleet Management URL and username in `fleet-config.alloy` to match your stack, then deploy to `/etc/alloy/config.alloy`:
+Grab the bootstrap config from this repo and drop it at `/etc/alloy/config.alloy`. Most users do this without cloning — pull the raw file, or copy-paste from the browser:
 
 ```bash
-cp fleet-config.alloy /etc/alloy/config.alloy
+# Download directly from the repo
+curl -fsSL https://raw.githubusercontent.com/scarolan/hardened-grafana-alloy-linux/main/fleet-config.alloy \
+  -o /etc/alloy/config.alloy
+
+# Edit the remotecfg URL and username to match your stack
+${EDITOR:-vi} /etc/alloy/config.alloy
 ```
+
+Or open the [raw file on GitHub](https://raw.githubusercontent.com/scarolan/hardened-grafana-alloy-linux/main/fleet-config.alloy), copy the contents, and paste into `/etc/alloy/config.alloy` on the host.
 
 This config is deliberately tiny — it only connects to Fleet Management. The real pipelines come down over the wire.
 
