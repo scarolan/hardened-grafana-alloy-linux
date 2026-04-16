@@ -5,12 +5,8 @@
 // This is an MVP (minimum viable product) configuration for machines managed
 // via Grafana Cloud Fleet Management. The idea is to keep the local config as
 // slim as possible — Fleet Management pushes the real collection pipelines
-// remotely, so all this file needs to do is:
-//
-//   1. Connect to Fleet Management and poll for remote config updates.
-//   2. Provide write endpoints for Prometheus metrics and Loki logs so that
-//      remotely-pushed pipelines have somewhere to send data.
-//
+// remotely, so all this file needs to do is connect to Fleet Management and
+// poll for remote config updates.
 //
 // PREREQUISITES
 // -------------
@@ -20,13 +16,24 @@
 // - Replace the placeholder usernames and URLs below with values from your
 //   own Grafana Cloud stack (Connection Details → Alloy configuration).
 //
-// HOW IT WORKS
-// ------------
-// The `remotecfg` block connects to Fleet Management, identifies itself by
-// hostname, and polls every 60 seconds for pipeline updates. The `attributes`
-// map lets you tag this collector (e.g. env, team) so you can target it with
-// Fleet Management rules. The Prometheus and Loki write blocks act as shared
-// "sinks" that any remotely-pushed pipeline can reference.
+// ⚠️  FLEET MANAGEMENT LIMITATION — remote_write ENDPOINTS ARE NOT SHARED
+// ----------------------------------------------------------------------
+// The `prometheus.remote_write` and `loki.write` blocks below are REFERENCE
+// TEMPLATES, not shared sinks. Pipelines you push via Fleet Management are
+// each wrapped in a sealed `declare` module — components inside a pipeline
+// CANNOT reference components defined here in the parent scope.
+//
+// You MUST include a `prometheus.remote_write` and/or `loki.write` block
+// inside every Fleet Management pipeline that ships metrics or logs. Use
+// `sys.env()` for credentials (set once per host) so you don't duplicate
+// values — just duplicate the block structure.
+//
+// Required env vars on each host for the env-var pattern:
+//   GCLOUD_RW_API_KEY, GRAFANA_METRICS_URL, GRAFANA_METRICS_USERNAME,
+//   GRAFANA_LOGS_URL, GRAFANA_LOGS_USERNAME
+//
+// See `examples/blackbox.alloy` for a complete self-contained pipeline
+// pattern you can copy when building new Fleet Management pipelines.
 // ============================================================================
 
 // --- Fleet Management Remote Configuration ---
@@ -47,10 +54,11 @@ remotecfg {
   }
 }
 
-// --- Prometheus Remote Write Endpoint ---
-// Shared metrics sink that remotely-pushed pipelines can forward to.
-// Replace the URL and username with values from your Grafana Cloud
-// Prometheus connection details.
+// --- Prometheus Remote Write Endpoint (REFERENCE TEMPLATE) ---
+// NOT reachable from Fleet Management pipelines — see warning at top of file.
+// Kept here as a canonical reference: copy this block into every FM pipeline
+// that ships metrics, and replace the URL and username with values from your
+// Grafana Cloud Prometheus connection details.
 prometheus.remote_write "metrics_service" {
   endpoint {
     url = "https://prometheus-prod-13-prod-us-east-0.grafana.net/api/prom/push"
@@ -62,10 +70,11 @@ prometheus.remote_write "metrics_service" {
   }
 }
 
-// --- Loki Write Endpoint ---
-// Shared logs sink that remotely-pushed pipelines can forward to.
-// Replace the URL and username with values from your Grafana Cloud
-// Loki connection details.
+// --- Loki Write Endpoint (REFERENCE TEMPLATE) ---
+// NOT reachable from Fleet Management pipelines — see warning at top of file.
+// Kept here as a canonical reference: copy this block into every FM pipeline
+// that ships logs, and replace the URL and username with values from your
+// Grafana Cloud Loki connection details.
 loki.write "grafana_cloud_loki" {
   endpoint {
     url = "https://logs-prod-006.grafana.net/loki/api/v1/push"

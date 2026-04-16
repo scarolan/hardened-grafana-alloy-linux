@@ -173,6 +173,14 @@ Tested on k3d: **1,635 series / 175 metric names** on a 2-node cluster.
 
 Fleet management via `remotecfg` is disabled by default. It adds ~216 self-monitoring series (`job="integrations/alloy"`). To enable, uncomment the `remotecfg` block in `config.alloy` and set the fleet credentials in your `.env`.
 
+> **⚠️ Fleet Management gotcha: remote_write endpoints are not shared**
+>
+> The `prometheus.remote_write` and `loki.write` blocks in `fleet-config.alloy` are **not reachable** from pipelines you push via Fleet Management. Each FM pipeline is wrapped in a sealed `declare` module, and components inside a module can't reference components in the parent scope.
+>
+> **You must include a `prometheus.remote_write` and/or `loki.write` block inside every FM pipeline** that ships data. Use `sys.env()` for credentials — set `GCLOUD_RW_API_KEY`, `GRAFANA_METRICS_URL`, `GRAFANA_METRICS_USERNAME`, `GRAFANA_LOGS_URL`, and `GRAFANA_LOGS_USERNAME` once per host so you don't have to hardcode values in every pipeline.
+>
+> See `examples/blackbox.alloy` for a complete self-contained pipeline pattern you can copy.
+
 ## Testing
 
 ### Prerequisites
