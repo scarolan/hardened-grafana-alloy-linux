@@ -1,21 +1,33 @@
 # Hardened Grafana Alloy for Linux
 
-A production-ready, hardened [Grafana Alloy](https://grafana.com/docs/alloy/) configuration for Linux monitoring with defense-in-depth cardinality protection.
+A production-ready, hardened [Grafana Alloy](https://grafana.com/docs/alloy/) configuration for Linux monitoring with defense-in-depth cardinality protection. Ships every metric required by the [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) dashboard (ID 1860) while keeping series counts lean and predictable.
 
-Ships every metric required by the [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) dashboard (ID 1860) while keeping series counts lean and predictable.
+## Pick Your Deployment Path
+
+| Path | When to use | Guide |
+|------|-------------|-------|
+| **Direct Deployment** | The hardened `config.alloy` lives on each host. You manage config updates via your existing tooling (Ansible, Chef, Puppet, cloud-init, manual). | [docs/direct-deployment.md](docs/direct-deployment.md) |
+| **Fleet Management** | A minimal bootstrap config (`fleet-config.alloy`) lives on each host. You build and push the real collection pipelines centrally via Grafana Cloud Fleet Management. | [docs/fleet-management.md](docs/fleet-management.md) |
 
 ## What's in the box
 
 ```
 config.alloy                  # Hardened Alloy config (River syntax)
+fleet-config.alloy            # Minimal bootstrap for Fleet Management
 config-otel.yaml              # Hardened OTEL Collector config (YAML)
-ALLOY-VS-OTEL.md             # When to use which — honest comparison
-.env.example                  # Credential template (copy to .env)
-Makefile                      # lint, test-tier1, test-tier2, clean
+ALLOY-VS-OTEL.md              # When to use Alloy vs vanilla OTEL — honest comparison
+examples/blackbox.alloy       # Self-contained pipeline pattern (blackbox exporter)
+
+docs/
+  direct-deployment.md        # Path 1 end-to-end guide
+  fleet-management.md         # Path 2 end-to-end guide
 
 k8s-monitoring/
   values-hardened.yaml        # Hardened values for k8s-monitoring-helm chart
   values-test.yaml            # Test overrides for local k3d validation
+
+.env.example                  # Credential template (copy to .env for local testing)
+Makefile                      # lint, test-tier1, test-tier2, clean
 
 scripts/
   patch_config_for_test.py    # Rewrites config.alloy for Docker test env
@@ -26,20 +38,11 @@ tests/
     assertions.py             # Reusable Prometheus query helpers
     metrics_allowlist.py      # Parses allow-list from config.alloy
   tier1/                      # Alloy Docker tests (CI)
-    docker-compose.yml
-    test_runner.py            # 33 pytest cases
-    fixtures/                 # Synthetic metrics for cardinality tests
   tier1-otel/                 # OTEL Collector Docker tests
-    docker-compose.yml        # Uses vanilla otel/opentelemetry-collector-contrib
-    test_runner.py            # 12 pytest cases
   tier2/                      # Alloy GCP VM tests (cross-distro)
-    terraform/
-    test_runner.py            # 55 pytest cases
   tier2-otel/                 # OTEL Collector GCP VM tests
-    terraform/
-    test_runner.py            # 55 pytest cases
 
-.github/workflows/test.yml   # CI: lint + Tier 1 on every push/PR
+.github/workflows/test.yml    # CI: lint + Tier 1 on every push/PR; weekly scheduled run against latest Alloy
 ```
 
 ## Cardinality protection
@@ -53,7 +56,7 @@ The config uses a 4-layer defense-in-depth approach:
 | **3. Label tagging** | Metrics missing required labels get `quality_warning="missing_required_labels"` — visible for triage, not silently lost | Query `{quality_warning=~".+"}` to find them |
 | **4. Value limits** | Truncates extremely long label values | Mountpoints capped at 100 chars |
 
-**Typical series budget:** 400-600 per cloud VM (Alloy), 100-300 per VM (OTEL Collector).
+**Typical series budget:** 400–600 per cloud VM (Alloy), 100–300 per VM (OTEL Collector).
 
 ## Systemd monitoring
 
@@ -75,69 +78,6 @@ To add your own services, edit the `unit_include` regex in the `systemd` block:
 systemd {
     unit_include = "(...|nginx\\.service|postgresql\\.service|my-app\\.service)"
 }
-```
-
-## Quick start
-
-### 1. Set up credentials
-
-```bash
-cp .env.example .env
-# Edit .env with your Grafana Cloud credentials
-```
-
-### 2. Deploy
-
-Copy `config.alloy` and your `.env` to the target host:
-
-```bash
-# Install Alloy (Debian/Ubuntu)
-apt-get install -y gpg wget
-wget -qO- https://apt.grafana.com/gpg.key | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
-echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
-  > /etc/apt/sources.list.d/grafana.list
-apt-get update && apt-get install -y alloy
-
-# Install Alloy (RHEL/Rocky/CentOS)
-cat > /etc/yum.repos.d/grafana.repo <<'EOF'
-[grafana]
-name=grafana
-baseurl=https://rpm.grafana.com
-repo_gpgcheck=1
-enabled=1
-gpgcheck=1
-gpgkey=https://rpm.grafana.com/gpg.key
-sslverify=1
-sslcacert=/etc/pki/tls/certs/ca-bundle.crt
-EOF
-dnf install -y alloy
-
-# Deploy config
-cp config.alloy /etc/alloy/config.alloy
-
-# Set credentials in the Alloy env file
-# Debian/Ubuntu: /etc/default/alloy
-# RHEL/Rocky/CentOS/SUSE: /etc/sysconfig/alloy
-cat >> /etc/default/alloy <<'EOF'
-GCLOUD_RW_API_KEY=your-api-key
-GRAFANA_METRICS_URL=https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push
-GRAFANA_METRICS_USERNAME=123456
-GRAFANA_LOGS_URL=https://logs-prod-XX.grafana.net/loki/api/v1/push
-GRAFANA_LOGS_USERNAME=654321
-EOF
-
-# Start
-systemctl enable --now alloy
-```
-
-### 3. Verify
-
-Open the [Node Exporter Full](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) dashboard in Grafana. All panels should populate.
-
-Check for data-quality issues:
-
-```promql
-{quality_warning=~".+"}
 ```
 
 ## OTEL Collector config (`config-otel.yaml`)
@@ -169,28 +109,6 @@ helm install k8s-monitoring grafana/k8s-monitoring \
 
 Tested on k3d: **1,635 series / 175 metric names** on a 2-node cluster.
 
-## Self-monitoring (optional)
-
-Fleet management via `remotecfg` is disabled by default. It adds ~216 self-monitoring series (`job="integrations/alloy"`). To enable, uncomment the `remotecfg` block in `config.alloy` and set the fleet credentials in your `.env`.
-
-> **⚠️ Fleet Management gotcha: remote_write endpoints are not shared**
->
-> The `prometheus.remote_write` and `loki.write` blocks in `fleet-config.alloy` are **not reachable** from pipelines you push via Fleet Management. Each FM pipeline is wrapped in a sealed `declare` module, and components inside a module can't reference components in the parent scope.
->
-> **You must include a `prometheus.remote_write` and/or `loki.write` block inside every FM pipeline** that ships data. Use `sys.env()` for credentials — set `GCLOUD_RW_API_KEY`, `GRAFANA_METRICS_URL`, `GRAFANA_METRICS_USERNAME`, `GRAFANA_LOGS_URL`, and `GRAFANA_LOGS_USERNAME` once per host so you don't have to hardcode values in every pipeline.
->
-> See `examples/blackbox.alloy` for a complete self-contained pipeline pattern you can copy.
-
-### Why env vars instead of hardcoding values into pipelines?
-
-Two reasons, and neither adds meaningful operational burden:
-
-1. **Secrets don't belong in the Fleet Management UI.** Pipelines you push via FM are stored in Grafana Cloud's config store and visible to anyone with FM access. Hardcoding your API key there means a Grafana Cloud user with the right role can read it, and it ends up in every pipeline export, backup, and screenshot. Keeping it in `sys.env()` means the secret lives on the host — rotated through your existing secret management, never echoed back in the UI.
-
-2. **You already have to set `GCLOUD_RW_API_KEY` on the host.** Alloy can't connect to Fleet Management without it. Since you're already setting one env var, adding four more (URLs + usernames) is seconds of extra work via the same systemd unit override or `/etc/default/alloy` file. It's not "yet another file to manage" — it's four more lines in the mechanism you already use.
-
-The URLs and usernames aren't secret, but keeping them next to the password means rotations and stack migrations are atomic: change the host env, restart Alloy, done. No need to re-edit N pipelines in the FM UI to point at a new stack.
-
 ## Testing
 
 ### Prerequisites
@@ -214,12 +132,10 @@ Runs 33 tests in ~2 minutes. Uses Docker Compose with Prometheus, Alloy, and a s
 Validates real-world collector behavior that can't be tested in Docker: systemd, PSI, hwmon, real disk/NIC devices, journal logs.
 
 ```bash
-# Set up infrastructure
 cd tests/tier2/terraform
 cp terraform.tfvars.example terraform.tfvars  # edit with your GCP project
 terraform init && terraform apply
 
-# Run tests
 cd ../../..
 make test-tier2
 
