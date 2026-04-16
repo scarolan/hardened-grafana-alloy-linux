@@ -1,6 +1,6 @@
 # Hardened Grafana Alloy for Linux
 
-A default [Grafana Alloy](https://grafana.com/docs/alloy/) install on Linux ships **2,000+ series per host** — most of them metrics no dashboard consumes, and cost you'll pay for indefinitely. This repo is a prebuilt, production-ready Alloy config that ships exactly what the [Node Exporter Full dashboard (ID 1860)](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) needs. Defense-in-depth cardinality protection keeps a typical cloud VM around **400–600 series** with no panels missing.
+This repo is a prebuilt, production-ready [Grafana Alloy](https://grafana.com/docs/alloy/) config that ships exactly what the [Node Exporter Full dashboard (ID 1860)](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) needs. Defense-in-depth cardinality protection keeps a typical cloud VM around **400–600 series** with no panels missing.
 
 ## Pick Your Deployment Path
 
