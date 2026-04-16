@@ -8,11 +8,12 @@ Deploy the hardened `config.alloy` directly to each Linux host using your existi
 
 ### Create an Access Policy and Token
 
-1. Visit `https://grafana.com/orgs/YOURORG/access-policies`
-2. Click **Create access policy**, give it a name, select your stack(s) under Realms
-3. Use **Add scope** and pick **set:alloy-data-write**
-4. Click **Create**, then **Add token** on the new policy, name it, set an expiration
-5. Copy the token immediately — this is your `GCLOUD_RW_API_KEY`
+1. Visit `https://grafana.com/orgs/<your-org-slug>/access-policies` — replace `<your-org-slug>` with the slug from your Grafana Cloud org URL (the part after `/orgs/`)
+2. Click **Create access policy**, give it a name (e.g. "Hardened Alloy"), and select your stack(s) under **Realms**
+3. **Ignore the individual scope checkboxes.** Instead, use the **Add scope** dropdown at the bottom and pick `set:alloy-data-write` — this bundles the metrics, logs, traces, and profiles write scopes in one step
+4. Click **Create** to save the policy
+5. On the new policy, click **Add token**, give it a name, and pick an expiration (90 days is typical for a pilot)
+6. **Copy the token value immediately** — it's shown exactly once. This is your `GCLOUD_RW_API_KEY`.
 
 ### Gather Your Endpoints
 

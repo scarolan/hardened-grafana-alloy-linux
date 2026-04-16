@@ -1,20 +1,20 @@
 # Hardened Grafana Alloy for Linux
 
-This repo is a prebuilt, production-ready [Grafana Alloy](https://grafana.com/docs/alloy/) config that ships exactly what the [Node Exporter Full dashboard (ID 1860)](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) needs. Defense-in-depth cardinality protection keeps a typical cloud VM around **400–600 series** with no panels missing.
+[Grafana Alloy](https://grafana.com/docs/alloy/) is a telemetry collector — the open-source agent that scrapes metrics and logs from a host and ships them to Grafana Cloud (or any Prometheus/Loki endpoint). This repo is a prebuilt, production-ready Alloy config that ships exactly what the [Node Exporter Full dashboard (ID 1860)](https://grafana.com/grafana/dashboards/1860-node-exporter-full/) needs. Defense-in-depth cardinality protection keeps a typical cloud VM around **400–600 series** with no panels missing.
 
 ## Pick Your Deployment Path
 
 | Path | When to use | Guide |
 |------|-------------|-------|
 | **Direct Deployment** | The hardened `config.alloy` lives on each host. You manage config updates via your existing tooling (Ansible, Chef, Puppet, cloud-init, manual). | [docs/direct-deployment.md](docs/direct-deployment.md) |
-| **Fleet Management** | A minimal bootstrap config (`fleet-config.alloy`) lives on each host. You build and push the real collection pipelines centrally via Grafana Cloud Fleet Management. | [docs/fleet-management.md](docs/fleet-management.md) |
+| **Fleet Management** | A minimal bootstrap config (`fleet-config.alloy`) lives on each host. You build and push the real collection pipelines centrally via [Grafana Cloud Fleet Management](https://grafana.com/docs/grafana-cloud/send-data/fleet-management/) — a Grafana Cloud feature that manages Alloy collectors remotely. | [docs/fleet-management.md](docs/fleet-management.md) |
 
 Both paths need the same five environment variables. See **[docs/env-vars.md](docs/env-vars.md)** for the canonical reference and how to set them (systemd env file, drop-in override, verification commands).
 
 ## What's in the box
 
 ```
-config.alloy                  # Hardened Alloy config (River syntax)
+config.alloy                  # Hardened Alloy config (Alloy configuration syntax)
 fleet-config.alloy            # Minimal bootstrap for Fleet Management
 config-otel.yaml              # Hardened OTEL Collector config (YAML)
 ALLOY-VS-OTEL.md              # When to use Alloy vs vanilla OTEL — honest comparison
@@ -112,11 +112,13 @@ helm install k8s-monitoring grafana/k8s-monitoring \
 
 Tested on k3d: **1,635 series / 175 metric names** on a 2-node cluster.
 
-## Testing
+## Testing (for contributors to this repo)
+
+If you're deploying this config to hosts, you can skip this section. The tests below are for anyone changing the config (adding metrics, adjusting rules) who needs to verify nothing regresses.
 
 ### Prerequisites
 
-- Docker Desktop (Tier 1)
+- Docker Engine or Docker Desktop (Tier 1)
 - Python 3.10+ with pytest (Tier 1)
 - GCP project + `gcloud` auth + Terraform (Tier 2)
 
@@ -172,12 +174,12 @@ Tested on:
 |--------|---------|-------|
 | Ubuntu | 20.04+ | Full support |
 | Debian | 11+ | Full support |
-| RHEL/Rocky | 8+ | PSI may be unavailable on older kernels |
-| CentOS Stream | 9 | PSI may be unavailable |
-| SUSE (SLES) | 15+ | PSI may be unavailable |
+| RHEL/Rocky | 8+ | PSI¹ may be unavailable on older kernels |
+| CentOS Stream | 9 | PSI¹ may be unavailable |
+| SUSE (SLES) | 15+ | PSI¹ may be unavailable |
 | Amazon Linux | 2023 | Supported; test separately on AWS |
 
-PSI (Pressure Stall Information) metrics require kernel 4.20+ with PSI enabled. On distros where PSI is unavailable, those metrics are simply absent — no errors.
+¹ PSI (Pressure Stall Information) metrics require kernel 4.20+ with PSI enabled. On distros where PSI is unavailable, those metrics are simply absent — no errors.
 
 ## Customizing
 
