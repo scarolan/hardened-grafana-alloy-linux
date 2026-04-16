@@ -181,6 +181,16 @@ Fleet management via `remotecfg` is disabled by default. It adds ~216 self-monit
 >
 > See `examples/blackbox.alloy` for a complete self-contained pipeline pattern you can copy.
 
+### Why env vars instead of hardcoding values into pipelines?
+
+Two reasons, and neither adds meaningful operational burden:
+
+1. **Secrets don't belong in the Fleet Management UI.** Pipelines you push via FM are stored in Grafana Cloud's config store and visible to anyone with FM access. Hardcoding your API key there means a Grafana Cloud user with the right role can read it, and it ends up in every pipeline export, backup, and screenshot. Keeping it in `sys.env()` means the secret lives on the host — rotated through your existing secret management, never echoed back in the UI.
+
+2. **You already have to set `GCLOUD_RW_API_KEY` on the host.** Alloy can't connect to Fleet Management without it. Since you're already setting one env var, adding four more (URLs + usernames) is seconds of extra work via the same systemd unit override or `/etc/default/alloy` file. It's not "yet another file to manage" — it's four more lines in the mechanism you already use.
+
+The URLs and usernames aren't secret, but keeping them next to the password means rotations and stack migrations are atomic: change the host env, restart Alloy, done. No need to re-edit N pipelines in the FM UI to point at a new stack.
+
 ## Testing
 
 ### Prerequisites
